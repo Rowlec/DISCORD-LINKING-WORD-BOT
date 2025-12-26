@@ -16,6 +16,7 @@ from database import async_session_factory
 from models.db_models import PlayerStats, GameSession
 from models.game import WordChainGame
 from services.game_manager import game_manager
+from services.word_validator import word_validator
 from views.party_setup import PartySetupView
 from views.game_ui import GameEmbed
 

@@ -1,10 +1,10 @@
 """
 Word Chain Discord Bot - Main Entry Point
 
-A Discord bot for playing word chain games with AI-powered word validation.
+A Discord bot for playing word chain games with Free Dictionary API validation.
 Features:
 - Party-based game system (2-10 players)
-- AI word validation (OpenAI/Anthropic)
+- Free Dictionary API word validation (no API key needed)
 - Visual turn timers
 - Elimination on timeout only
 - Multiple game modes (Normal/Hard)
