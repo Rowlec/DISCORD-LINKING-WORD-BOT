@@ -443,23 +443,30 @@ class GameManager:
             if not stats:
                 stats = PlayerStats(
                     user_id=player.user_id,
-                    guild_id=game.guild_id
+                    guild_id=game.guild_id,
+                    games_played=0,
+                    games_won=0,
+                    total_words=0,
+                    total_invalid_words=0,
+                    total_timeouts=0,
+                    current_win_streak=0,
+                    best_win_streak=0
                 )
                 session.add(stats)
             
             # Update stats
-            stats.games_played += 1
-            stats.total_words += player.words_played
-            stats.total_invalid_words += player.invalid_attempts
+            stats.games_played = (stats.games_played or 0) + 1
+            stats.total_words = (stats.total_words or 0) + player.words_played
+            stats.total_invalid_words = (stats.total_invalid_words or 0) + player.invalid_attempts
             
             if player.is_eliminated:
-                stats.total_timeouts += 1
+                stats.total_timeouts = (stats.total_timeouts or 0) + 1
                 stats.current_win_streak = 0
             
             if player.user_id == winner_id:
-                stats.games_won += 1
-                stats.current_win_streak += 1
-                if stats.current_win_streak > stats.best_win_streak:
+                stats.games_won = (stats.games_won or 0) + 1
+                stats.current_win_streak = (stats.current_win_streak or 0) + 1
+                if stats.current_win_streak > (stats.best_win_streak or 0):
                     stats.best_win_streak = stats.current_win_streak
         
         await session.commit()

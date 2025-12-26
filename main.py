@@ -18,7 +18,7 @@ from pathlib import Path
 import discord
 from discord.ext import commands
 
-from config import SETTINGS, LOGGER_NAME_MAIN, LOGGER_NAME_GAME, LOGGER_NAME_AI, LOGGER_NAME_DB
+from config import SETTINGS, LOGGER_NAME_MAIN, LOGGER_NAME_GAME, LOGGER_NAME_WORD, LOGGER_NAME_DB
 from database import init_database, close_database
 
 # Setup logging
@@ -49,7 +49,7 @@ def setup_logging():
     file_handler.setLevel(logging.DEBUG)
     
     # Setup loggers
-    for logger_name in [LOGGER_NAME_MAIN, LOGGER_NAME_GAME, LOGGER_NAME_AI, LOGGER_NAME_DB]:
+    for logger_name in [LOGGER_NAME_MAIN, LOGGER_NAME_GAME, LOGGER_NAME_WORD, LOGGER_NAME_DB]:
         logger = logging.getLogger(logger_name)
         logger.setLevel(logging.DEBUG)
         logger.addHandler(console_handler)
@@ -118,7 +118,7 @@ class WordChainBot(commands.Bot):
         self.logger.info(f"Bot is ready!")
         self.logger.info(f"Logged in as: {self.user.name} (ID: {self.user.id})")
         self.logger.info(f"Connected to {len(self.guilds)} guilds")
-        self.logger.info(f"Using AI provider: {SETTINGS.ai_provider}")
+        self.logger.info(f"Using word validator: Free Dictionary API")
         self.logger.info(f"Dev mode: {SETTINGS.dev_mode}")
     
     async def on_guild_join(self, guild: discord.Guild):
@@ -159,14 +159,6 @@ async def main():
     # Validate configuration
     if not SETTINGS.discord_token:
         logger.error("DISCORD_TOKEN not set! Please set it in .env file.")
-        sys.exit(1)
-    
-    if SETTINGS.ai_provider == "openai" and not SETTINGS.openai_api_key:
-        logger.error("OPENAI_API_KEY not set! Please set it in .env file.")
-        sys.exit(1)
-    
-    if SETTINGS.ai_provider == "anthropic" and not SETTINGS.anthropic_api_key:
-        logger.error("ANTHROPIC_API_KEY not set! Please set it in .env file.")
         sys.exit(1)
     
     # Create and run bot

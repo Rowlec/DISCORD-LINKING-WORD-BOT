@@ -16,7 +16,6 @@ from database import async_session_factory
 from models.db_models import PlayerStats, GameSession
 from models.game import WordChainGame
 from services.game_manager import game_manager
-from services.ai_validator import word_validator
 from views.party_setup import PartySetupView
 from views.game_ui import GameEmbed
 
@@ -76,6 +75,9 @@ class GameCommands(commands.Cog):
             )
             return
         
+        # Defer response immediately to avoid timeout
+        await interaction.response.defer()
+        
         # Create the game
         game = await game_manager.create_game(
             guild_id=interaction.guild_id,
@@ -85,24 +87,33 @@ class GameCommands(commands.Cog):
             timer_seconds=timer
         )
         
-        # Create party setup view
+        # Create party setup view with callbacks that sync with GameManager
         async def on_start():
             await self._start_game(interaction.channel, game)
         
         async def on_cancel():
             await game_manager.cancel_game(interaction.channel_id)
         
+        async def on_join(user: discord.User) -> bool:
+            """Sync join with GameManager."""
+            player = await game_manager.join_game(interaction.channel_id, user)
+            return player is not None
+        
+        async def on_leave(user_id: int) -> bool:
+            """Sync leave with GameManager."""
+            return await game_manager.leave_game(interaction.channel_id, user_id)
+        
         view = PartySetupView(
             creator_id=interaction.user.id,
+            game=game,
             on_start=on_start,
-            on_cancel=on_cancel
+            on_cancel=on_cancel,
+            on_join=on_join,
+            on_leave=on_leave
         )
-        view.players = [interaction.user]
-        view.selected_mode = mode
-        view.selected_timer = timer
         
         embed = view.create_embed()
-        await interaction.response.send_message(embed=embed, view=view)
+        await interaction.followup.send(embed=embed, view=view)
     
     async def _start_game(self, channel: discord.TextChannel, game: WordChainGame):
         """Start the game after party setup."""

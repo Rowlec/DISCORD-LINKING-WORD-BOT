@@ -1,0 +1,32 @@
+# Ignore Python cache and build artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+dist/
+build/
+
+# Environment files (keep example only)
+.env
+*.env
+.env.*
+!.env.example
+
+# SQLite databases and local data
+*.db
+*.sqlite3
+word_chain_bot.db
+
+# Logs
+logs/
+*.log
+
+# IDE/editor settings
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db

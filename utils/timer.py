@@ -55,6 +55,9 @@ class TurnTimer:
         # Reset turn start time
         self.game.turn_start_time = datetime.utcnow()
         
+        # Mention the current player
+        await self.channel.send(f"<@{self._current_player_id}> đến lượt của bạn! ⏰")
+        
         # Create initial timer message
         embed = TimerEmbed.create(self.game, self.game.timer_seconds)
         self._timer_message = await self.channel.send(embed=embed)

@@ -1,9 +1,9 @@
 """Services module for Word Chain Bot."""
-from services.ai_validator import AIWordValidator, WordValidationResult
+from services.word_validator import WordValidator, WordValidationResult
 from services.game_manager import GameManager
 
 __all__ = [
-    "AIWordValidator",
+    "WordValidator",
     "WordValidationResult",
     "GameManager",
 ]

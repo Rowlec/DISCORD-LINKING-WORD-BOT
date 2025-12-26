@@ -4,9 +4,12 @@ Provides Discord UI components for game creation and party management.
 """
 import discord
 from discord import ui
-from typing import Optional, Callable, Awaitable
+from typing import Optional, Callable, Awaitable, TYPE_CHECKING
 
 from config import SETTINGS, GameMode, TIMER_OPTIONS
+
+if TYPE_CHECKING:
+    from models.game import WordChainGame
 
 
 class GameModeSelect(ui.Select):
@@ -72,23 +75,26 @@ class PartySetupView(ui.View):
     View for setting up a game party.
     
     Shows game options, current players, and control buttons.
+    Now syncs directly with GameManager for consistent state.
     """
     
     def __init__(
         self,
         creator_id: int,
+        game: "WordChainGame",
         on_start: Optional[Callable[[], Awaitable[None]]] = None,
         on_cancel: Optional[Callable[[], Awaitable[None]]] = None,
+        on_join: Optional[Callable[[discord.User], Awaitable[bool]]] = None,
+        on_leave: Optional[Callable[[int], Awaitable[bool]]] = None,
         timeout: float = 300.0  # 5 minutes
     ):
         super().__init__(timeout=timeout)
         self.creator_id = creator_id
+        self.game = game  # Reference to actual game state
         self.on_start = on_start
         self.on_cancel = on_cancel
-        
-        self.selected_mode = GameMode.NORMAL
-        self.selected_timer = SETTINGS.default_timer_seconds
-        self.players: list[discord.User] = []
+        self.on_join = on_join
+        self.on_leave = on_leave
         
         # Add select menus
         self.mode_select = GameModeSelect()
@@ -99,7 +105,7 @@ class PartySetupView(ui.View):
     @property
     def can_start(self) -> bool:
         """Check if game can be started."""
-        return len(self.players) >= SETTINGS.min_players
+        return len(self.game.players) >= SETTINGS.min_players
     
     def get_selected_mode(self) -> str:
         """Get the selected game mode."""
@@ -123,21 +129,30 @@ class PartySetupView(ui.View):
         """Handle join button click."""
         user = interaction.user
         
-        if user.id in [p.id for p in self.players]:
+        if user.id in self.game.players:
             await interaction.response.send_message(
                 "❌ Bạn đã ở trong party rồi!",
                 ephemeral=True
             )
             return
         
-        if len(self.players) >= SETTINGS.max_players:
+        if len(self.game.players) >= SETTINGS.max_players:
             await interaction.response.send_message(
                 f"❌ Party đã đầy! (tối đa {SETTINGS.max_players} người)",
                 ephemeral=True
             )
             return
         
-        self.players.append(user)
+        # Call the join callback to sync with GameManager
+        if self.on_join:
+            success = await self.on_join(user)
+            if not success:
+                await interaction.response.send_message(
+                    "❌ Không thể tham gia party!",
+                    ephemeral=True
+                )
+                return
+        
         await interaction.response.send_message(
             f"✅ {user.display_name} đã tham gia party!",
             ephemeral=False
@@ -163,14 +178,23 @@ class PartySetupView(ui.View):
             )
             return
         
-        if user.id not in [p.id for p in self.players]:
+        if user.id not in self.game.players:
             await interaction.response.send_message(
                 "❌ Bạn không ở trong party!",
                 ephemeral=True
             )
             return
         
-        self.players = [p for p in self.players if p.id != user.id]
+        # Call the leave callback to sync with GameManager
+        if self.on_leave:
+            success = await self.on_leave(user.id)
+            if not success:
+                await interaction.response.send_message(
+                    "❌ Không thể rời party!",
+                    ephemeral=True
+                )
+                return
+        
         await interaction.response.send_message(
             f"👋 {user.display_name} đã rời party.",
             ephemeral=False
@@ -246,13 +270,13 @@ class PartySetupView(ui.View):
     
     def create_embed(self) -> discord.Embed:
         """Create the party setup embed."""
-        mode_name = "Thường (1 chữ)" if self.get_selected_mode() == GameMode.NORMAL else "Khó (2 chữ)"
-        timer = self.get_selected_timer()
+        mode_name = "Thường (1 chữ)" if self.game.game_mode == GameMode.NORMAL else "Khó (2 chữ)"
+        timer = self.game.timer_seconds
         
         embed = discord.Embed(
             title="🎯 Word Chain - Tạo Party",
             description=(
-                "Chọn chế độ chơi và thời gian, sau đó nhấn **Tham gia** để vào party!\n"
+                "Nhấn **Tham gia** để vào party!\n"
                 f"Cần ít nhất **{SETTINGS.min_players}** người để bắt đầu."
             ),
             color=discord.Color.blue()
@@ -264,18 +288,19 @@ class PartySetupView(ui.View):
             inline=True
         )
         
+        # Get players from game state
         player_list = "\n".join(
-            f"{'👑 ' if p.id == self.creator_id else ''}{i+1}. {p.display_name}"
-            for i, p in enumerate(self.players)
+            f"{'👑 ' if uid == self.creator_id else ''}{i+1}. {self.game.players[uid].display_name}"
+            for i, uid in enumerate(self.game.turn_order_list)
         ) or "*Chưa có ai*"
         
         embed.add_field(
-            name=f"👥 Người chơi ({len(self.players)}/{SETTINGS.max_players})",
+            name=f"👥 Người chơi ({len(self.game.players)}/{SETTINGS.max_players})",
             value=player_list,
             inline=True
         )
         
-        status = "✅ Sẵn sàng!" if self.can_start else f"⏳ Đợi thêm {SETTINGS.min_players - len(self.players)} người..."
+        status = "✅ Sẵn sàng!" if self.can_start else f"⏳ Đợi thêm {SETTINGS.min_players - len(self.game.players)} người..."
         embed.set_footer(text=status)
         
         return embed

@@ -15,12 +15,6 @@ class Settings(BaseSettings):
     # Discord Bot Token
     discord_token: str = Field(default=None, validation_alias="DISCORD_TOKEN")
     
-    # AI Provider Settings
-    ai_provider: str = Field(default="openai", validation_alias="AI_PROVIDER")  # "openai" or "anthropic"
-    openai_api_key: Optional[str] = Field(default=None, validation_alias="OPENAI_API_KEY")
-    anthropic_api_key: Optional[str] = Field(default=None, validation_alias="ANTHROPIC_API_KEY")
-    ai_model: str = Field(default="gpt-4o-mini", validation_alias="AI_MODEL")
-    
     # Database
     database_url: str = Field(
         default="sqlite+aiosqlite:///word_chain_bot.db",
@@ -74,7 +68,7 @@ TIMER_EMOJI_EMPTY = "⚪"
 # Logger names
 LOGGER_NAME_MAIN = "__main__"
 LOGGER_NAME_GAME = "__game__"
-LOGGER_NAME_AI = "__ai_validator__"
+LOGGER_NAME_WORD = "__word_validator__"
 LOGGER_NAME_DB = "__database__"
 
 # Supported Languages

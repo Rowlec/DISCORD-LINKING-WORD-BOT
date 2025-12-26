@@ -13,7 +13,7 @@ from config import SETTINGS, LOGGER_NAME_GAME, GameStatus
 from database import async_session_factory
 from models.game import WordChainGame
 from services.game_manager import game_manager
-from services.ai_validator import word_validator
+from services.word_validator import word_validator
 from views.game_ui import GameEmbed
 from utils.timer import timer_manager
 
@@ -64,16 +64,14 @@ class WordHandler(commands.Cog):
         
         channel = message.channel
         
-        # Stop the timer while processing
-        await timer_manager.stop_timer(channel.id)
+        # Lưu ý: Không dừng/reset timer khi xử lý từ không hợp lệ.
+        # Timer sẽ tiếp tục chạy cho người chơi hiện tại; chỉ reset khi từ hợp lệ và chuyển lượt.
         
         # Check 1: Word already used in this session
         if game.is_word_used(word):
             embed = GameEmbed.word_already_used(word, player.display_name)
             await channel.send(embed=embed)
             await game_manager.record_invalid_attempt(channel.id, message.author.id)
-            # Restart timer for same player
-            await self._start_turn_timer(game, channel)
             return
         
         # Check 2: Word starts with correct letters
@@ -85,8 +83,6 @@ class WordHandler(commands.Cog):
             )
             await channel.send(embed=embed)
             await game_manager.record_invalid_attempt(channel.id, message.author.id)
-            # Restart timer for same player
-            await self._start_turn_timer(game, channel)
             return
         
         # Check 3: Validate word with AI
@@ -98,8 +94,6 @@ class WordHandler(commands.Cog):
             embed = GameEmbed.plural_word(word, player.display_name)
             await channel.send(embed=embed)
             await game_manager.record_invalid_attempt(channel.id, message.author.id)
-            # Restart timer for same player
-            await self._start_turn_timer(game, channel)
             return
         
         # Check if invalid word
@@ -108,8 +102,6 @@ class WordHandler(commands.Cog):
             embed = GameEmbed.word_invalid(word, player.display_name, reason)
             await channel.send(embed=embed)
             await game_manager.record_invalid_attempt(channel.id, message.author.id)
-            # Restart timer for same player
-            await self._start_turn_timer(game, channel)
             return
         
         # Word is valid! Record it
@@ -178,25 +170,42 @@ class WordHandler(commands.Cog):
         user_id: int
     ):
         """Handle player timeout."""
-        player = await game_manager.eliminate_player(channel.id, user_id, reason="timeout")
-        if not player:
-            return
-        
-        # Send elimination embed
-        embed = GameEmbed.player_eliminated(
-            player.display_name,
-            "Hết thời gian ⏰",
-            game.active_player_count
-        )
-        await channel.send(embed=embed)
-        
-        # Check if game should end
-        if game.is_game_over:
-            await self._end_game(game, channel)
-        else:
-            # Move to next player and start timer
-            game.next_turn()
-            await self._start_turn_timer(game, channel)
+        try:
+            # Get fresh game state from manager
+            game = game_manager.get_game(channel.id)
+            if not game:
+                logger.warning(f"Timeout handler: game not found for channel {channel.id}")
+                return
+            
+            player = await game_manager.eliminate_player(channel.id, user_id, reason="timeout")
+            if not player:
+                logger.warning(f"Timeout handler: player {user_id} not found or already eliminated")
+                return
+            
+            # Get updated player count after elimination (re-fetch game state)
+            game = game_manager.get_game(channel.id)
+            remaining_count = game.active_player_count if game else 0
+            
+            logger.info(f"Player {user_id} eliminated by timeout, remaining: {remaining_count}")
+            
+            # Send elimination embed
+            embed = GameEmbed.player_eliminated(
+                player.display_name,
+                "Hết thời gian ⏰",
+                remaining_count
+            )
+            await channel.send(embed=embed)
+            
+            # Check if game should end (only 1 or 0 players remaining)
+            if remaining_count <= 1:
+                logger.info(f"Game ending: only {remaining_count} player(s) remaining")
+                await self._end_game(game, channel)
+            else:
+                # Move to next player and start timer
+                game.next_turn()
+                await self._start_turn_timer(game, channel)
+        except Exception as e:
+            logger.error(f"Error in timeout handler: {e}", exc_info=True)
     
     async def _handle_forfeit(
         self,
@@ -208,59 +217,85 @@ class WordHandler(commands.Cog):
         # Stop timer first
         await timer_manager.stop_timer(channel.id)
         
+        # Get fresh game state
+        game = game_manager.get_game(channel.id)
+        if not game:
+            return
+        
+        # Check if it was this player's turn before forfeit
+        was_current_turn = (game.current_player_id == user_id)
+        
         player = await game_manager.forfeit_player(channel.id, user_id)
         if not player:
             return
         
+        # Get updated player count after forfeit
+        remaining_count = game.active_player_count
+        
         # Send forfeit embed
         embed = GameEmbed.player_forfeit(
             player.display_name,
-            game.active_player_count
+            remaining_count
         )
         await channel.send(embed=embed)
         
-        # Check if game should end
-        if game.is_game_over:
+        # Check if game should end (only 1 or 0 players remaining)
+        if remaining_count <= 1:
             await self._end_game(game, channel)
         else:
             # If it was this player's turn, move to next
-            if game.current_player_id == user_id or user_id in [p.user_id for p in game.active_players]:
+            if was_current_turn:
                 game.next_turn()
             await self._start_turn_timer(game, channel)
     
     async def _end_game(self, game: WordChainGame, channel: discord.TextChannel):
         """End the game and announce winner."""
-        # Stop timer
-        await timer_manager.stop_timer(channel.id)
-        
-        winner = game.winner
-        winner_id = winner.user_id if winner else None
-        
-        # Calculate duration
-        duration = 0
-        if game.started_at:
-            duration = int((datetime.utcnow() - game.started_at).total_seconds() / 60)
-        
-        # Total words across all chains
-        total_words = len(game.used_words_in_session)
-        
-        # End game in manager
-        await game_manager.end_game(channel.id, winner_id)
-        
-        # Send winner embed
-        if winner:
-            embed = GameEmbed.game_winner(
-                winner.display_name,
-                winner.user_id,
-                total_words,
-                game.chain_resets,
-                duration
-            )
-            await channel.send(embed=embed)
-        else:
-            # No winner (all players left?)
-            embed = GameEmbed.game_cancelled("Không còn người chơi")
-            await channel.send(embed=embed)
+        try:
+            logger.info(f"_end_game called for session {game.session_id if game else 'None'}")
+            
+            # Stop timer
+            await timer_manager.stop_timer(channel.id)
+            
+            # Use the game object passed in (don't re-fetch as it might be removed)
+            if not game:
+                logger.warning("Game object is None in _end_game")
+                return
+            
+            winner = game.winner
+            winner_id = winner.user_id if winner else None
+            
+            logger.info(f"Winner determined: {winner.display_name if winner else 'None'} (id={winner_id})")
+            
+            # Calculate duration
+            duration = 0
+            if game.started_at:
+                duration = int((datetime.utcnow() - game.started_at).total_seconds() / 60)
+            
+            # Total words across all chains
+            total_words = len(game.used_words_in_session)
+            chain_resets = game.chain_resets
+            
+            # End game in manager (this removes the game from active games)
+            await game_manager.end_game(channel.id, winner_id)
+            
+            # Send winner embed AFTER ending game in manager
+            if winner:
+                logger.info(f"Sending winner embed for {winner.display_name}")
+                embed = GameEmbed.game_winner(
+                    winner.display_name,
+                    winner.user_id,
+                    total_words,
+                    chain_resets,
+                    duration
+                )
+                await channel.send(embed=embed)
+            else:
+                # No winner (all players left?)
+                logger.info("No winner - sending cancelled embed")
+                embed = GameEmbed.game_cancelled("Không còn người chơi")
+                await channel.send(embed=embed)
+        except Exception as e:
+            logger.error(f"Error in _end_game: {e}", exc_info=True)
     
     async def _cancel_game(self, game: WordChainGame, channel: discord.TextChannel):
         """Cancel the game."""
